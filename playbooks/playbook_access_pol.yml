@@ -1,0 +1,292 @@
+---
+- name: Configure ACI Access Policies
+  hosts: apics
+  connection: local
+  gather_facts: false
+    
+  tasks:
+  - name: Loading "Domain and VLAN Pools" Information from CSV File
+    read_csv:
+      path: ../aci_config/dom_vlan_pool-{{ inventory_hostname }}.csv
+    register: dom_vlan_pools
+    delegate_to: localhost
+    tags:
+     - dom_vlan
+
+  - name: Loading "Leaf Profiles and Interface Profiles" Information from CSV File
+    read_csv:
+      path: ../aci_config/leaf_int_pol-{{ inventory_hostname }}.csv
+    register: leaf_int_pols
+    delegate_to: localhost
+    tags:
+     - sw_profile
+     - int_profile
+     - int_selector
+
+  - name: Loading "Policy Groups" Information from CSV File
+    read_csv:
+      path: ../aci_config/ifpolgrp-{{ inventory_hostname }}.csv
+    register: ifpolgroups
+    delegate_to: localhost
+    tags:
+      - ifpolgrp
+
+  - name: Loading "VPC Domains" Information from CSV File
+    read_csv:
+      path: ../aci_config/vpc_domain-{{ inventory_hostname }}.csv
+    register: vpc_domains
+    delegate_to: localhost
+    tags:
+      - vpc_domain
+
+  - name: Configure Interface Policies
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <infraInfra annotation="" dn="uni/infra" nameAlias="" ownerKey="" ownerTag="">
+                <!-- CONFIGURE INTERFACE POLICIES -->
+                <lldpIfPol adminRxSt="disabled" adminTxSt="enabled" annotation="" descr="" dn="" name="IFPOL_LLDP_TX_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <lldpIfPol adminRxSt="enabled" adminTxSt="enabled" annotation="" descr="" dn="" name="IFPOL_LLDP_TXRX_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <lldpIfPol adminRxSt="disabled" adminTxSt="disabled" annotation="" descr="" dn="" name="IFPOL_LLDP_TXRX_DISABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <lldpIfPol adminRxSt="enabled" adminTxSt="disabled" annotation="" descr="" dn="" name="IFPOL_LLDP_RX_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <fabricHIfPol annotation="" autoNeg="off" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_100M_AUTO_OFF" nameAlias="" ownerKey="" ownerTag="" speed="100M"/>
+                <fabricHIfPol annotation="" autoNeg="on" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_100M_AUTO" nameAlias="" ownerKey="" ownerTag="" speed="100M"/>
+                <fabricHIfPol annotation="" autoNeg="off" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_100G_AUTO_OFF" nameAlias="" ownerKey="" ownerTag="" speed="100G"/>
+                <fabricHIfPol annotation="" autoNeg="on" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_10G_AUTO" nameAlias="" ownerKey="" ownerTag="" speed="10G"/>
+                <fabricHIfPol annotation="" autoNeg="on" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_25G_AUTO" nameAlias="" ownerKey="" ownerTag="" speed="25G"/>
+                <fabricHIfPol annotation="" autoNeg="off" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_40G_AUTO_OFF" nameAlias="" ownerKey="" ownerTag="" speed="40G"/>
+                <fabricHIfPol annotation="" autoNeg="off" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_1G_AUTO_OFF" nameAlias="" ownerKey="" ownerTag="" speed="1G"/>
+                <fabricHIfPol annotation="" autoNeg="on" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_40G_AUTO" nameAlias="" ownerKey="" ownerTag="" speed="40G"/>
+                <fabricHIfPol annotation="" autoNeg="on" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_100G_AUTO" nameAlias="" ownerKey="" ownerTag="" speed="100G"/>
+                <fabricHIfPol annotation="" autoNeg="on" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_1G_AUTO" nameAlias="" ownerKey="" ownerTag="" speed="1G"/>
+                <fabricHIfPol annotation="" autoNeg="off" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_10G_AUTO_OFF" nameAlias="" ownerKey="" ownerTag="" speed="10G"/>
+                <fabricHIfPol annotation="" autoNeg="off" descr="" dfeDelayMs="0" dn="" fecMode="inherit" linkDebounce="100" name="IFPOL_25G_AUTO_OFF" nameAlias="" ownerKey="" ownerTag="" speed="25G"/>
+                <stpIfPol annotation="" ctrl="bpdu-filter,bpdu-guard" descr="" dn="" name="IFPOL_BPDU_GUARD_FILTER_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <stpIfPol annotation="" ctrl="bpdu-filter" descr="" dn="" name="IFPOL_BPDU_FILTER_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <stpIfPol annotation="" ctrl="" descr="" dn="" name="IFPOL_BPDU_GUARD_FILTER_DISABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <stpIfPol annotation="" ctrl="bpdu-guard" descr="" dn="" name="IFPOL_BPDU_GUARD_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <mcpIfPol adminSt="enabled" annotation="" descr="" dn="" name="IFPOL_MCP_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <mcpIfPol adminSt="disabled" annotation="" descr="" dn="" name="IFPOL_MCP_DISABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpIfPol annotation="" descr="" dn="" name="IFPOL_LACP_MEMBER_FAST" nameAlias="" ownerKey="" ownerTag="" prio="32768" txRate="fast"/>
+                <lacpIfPol annotation="" descr="" dn="" name="IFPOL_LACP_MEMBER_NORMAL" nameAlias="" ownerKey="" ownerTag="" prio="32768" txRate="normal"/>
+                <cdpIfPol adminSt="disabled" annotation="" descr="" dn="" name="IFPOL_CDP_DISABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <cdpIfPol adminSt="enabled" annotation="" descr="" dn="" name="IFPOL_CDP_ENABLED" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="fast-sel-hot-stdby,susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="active" name="IFPOL_LACP_ACTIVE_SWITCH" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="fast-sel-hot-stdby,susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="passive" name="IFPOL_LACP_PASSIVE_SWITCH" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="" descr="" dn="" maxLinks="16" minLinks="1" mode="off" name="IFPOL_STATIC_MODE_ON" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="active" name="IFPOL_LACP_ACTIVE_SERVER" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="passive" name="IFPOL_LACP_PASSIVE_SERVER" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="fast-sel-hot-stdby,graceful-conv,susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="active" name="IFPOL_LACP_ACTIVE_NEXUS" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="fast-sel-hot-stdby,graceful-conv,susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="passive" name="IFPOL_LACP_PASSIVE_NEXUS" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="fast-sel-hot-stdby,graceful-conv,susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="mac-pin" name="IFPOL_MAC_PINNING" nameAlias="" ownerKey="" ownerTag=""/>
+                <lacpLagPol annotation="" ctrl="fast-sel-hot-stdby,graceful-conv,susp-individual" descr="" dn="" maxLinks="16" minLinks="1" mode="mac-pin-nicload" name="IFPOL_MAC_PINNING_NIC_LOAD" nameAlias="" ownerKey="" ownerTag=""/>
+            </infraInfra>
+        </polUni>
+    tags:
+      - int_policies
+
+  - name: Configure Leaf Switch Profile
+    cisco.aci.aci_switch_policy_leaf_profile:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      leaf_profile: "{{ item.sw_profile }}"
+      state: "{{ item.sw_profile_state }}"
+      validate_certs: false
+    loop: "{{ leaf_int_pols.list | json_query('[].{sw_profile: sw_profile, sw_profile_state: sw_profile_state}')|unique }}"
+    loop_control:
+      label: "Configuring Leaf Switch Profile \"{{ item.sw_profile }}\""
+    tags:
+      - sw_profile
+
+  - name: Configure Leaf Switch Selector and Associate to Switch Profile
+    cisco.aci.aci_switch_leaf_selector:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      leaf_profile: "{{ item.sw_profile }}"
+      leaf: "SWSEL_LEAF_{{ item.node_id }}"
+      leaf_node_blk: "LEAF_{{ item.node_id }}"
+      from: "{{ item.node_id }}"
+      to: "{{ item.node_id }}"
+      state: "present"
+      validate_certs: false
+    loop: "{{ leaf_int_pols.list | json_query('[].{node_id: node_id, sw_profile: sw_profile}')|unique }}"
+    loop_control:
+      label: "Configuring Leaf Switch Selector for node \"{{ item.node_id }}\""
+    tags:
+      - sw_profile
+
+  - name: Configure VPC Domain
+    cisco.aci.aci_switch_policy_vpc_protection_group:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      protection_group: "{{ item.vpc_domain_name }}"
+      protection_group_id: "{{ item.vpc_id }}"
+      switch_1_id: "{{ item.switch_1 }}"
+      switch_2_id: "{{ item.switch_2 }}"
+      state: "{{ item.state }}"
+      validate_certs: false
+    loop: "{{ vpc_domains.list }}"
+    loop_control:
+      label: "Configuring VPC Domain for Nodes \"{{ item.switch_1 }}\" and \"{{ item.switch_2 }}\" using Node ID \"{{ item.vpc_id }}\""
+    tags:
+      - vpc_domain
+
+  - name: Configure Domain
+    cisco.aci.aci_domain:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      domain: "{{ item.domain_name }}"
+      domain_type: "{{ item.domain_type }}"
+      state: present
+    loop: "{{ dom_vlan_pools.list | json_query('[].{domain_name: domain_name, domain_type: domain_type}')|unique }}"
+    loop_control:
+      label: "Configuring Domain Name \"{{ item.domain_name }}\""
+    tags:
+      - dom_vlan
+
+  - name: Group VLAN Encap by VLAN Pool
+    set_fact:
+      vlan_pool_groupby: "{{ dom_vlan_pools.list | groupby('pool_name') }}"
+    tags:
+      - dom_vlan
+
+  - name: Configure VLAN Encap
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content: "{{ lookup('template', '../templates/vlan_encap.xml.j2') }}"
+    tags:
+      - dom_vlan
+
+  - name: Associate Domain to VLAN Pool
+    cisco.aci.aci_domain_to_vlan_pool:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      domain: "{{ item.domain_name }}"
+      domain_type: "{{ item.domain_type }}"
+      pool: "{{ item.pool_name }}"
+      pool_allocation_mode: "{{ item.pool_allocation_mode }}"
+      state: present
+    loop: "{{ dom_vlan_pools.list | json_query('[].{domain_name: domain_name, domain_type: domain_type, pool_name: pool_name, pool_allocation_mode: pool_allocation_mode}')|unique }}"
+    loop_control:
+      label: "Associating Domain \"{{ item.domain_name }}\" to VLAN Pool \"{{ item.pool_name }}\" "
+    tags:
+      - dom_vlan
+
+  - name: Configure Interface Policy Group Type PC
+    cisco.aci.aci_interface_policy_leaf_policy_group:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      policy_group: "{{ item.policy_group_name }}"
+      description: "{{ item.description }}"
+      aep: "{{ item.aep }}"
+      link_level_policy: "{{ item.link_level_policy }}"
+      mcp_policy: "{{ item.mcp_policy }}"
+      lag_type: "link"
+      cdp_policy: "{{ item.cdp_policy }}"
+      lldp_policy: "{{ item.lldp_policy }}"
+      port_channel_policy: "{{ item.port_channel_policy }}"
+      stp_interface_policy: "{{ item.stp_interface_policy }}"
+      state: "{{ item.state }}"
+      validate_certs: false
+    loop: "{{ ifpolgroups.list | json_query('[?lag_type==`link`]') }}"
+    loop_control:
+      label: "Configuring Interface Policy type PC using name \"{{ item.policy_group_name }}\""
+    tags:
+      - ifpolgrp
+
+  - name: Configure Interface Policy Group Type VPC
+    cisco.aci.aci_interface_policy_leaf_policy_group:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      policy_group: "{{ item.policy_group_name }}"
+      description: "{{ item.description }}"
+      aep: "{{ item.aep }}"
+      link_level_policy: "{{ item.link_level_policy }}"
+      mcp_policy: "{{ item.mcp_policy }}"
+      lag_type: "node"
+      cdp_policy: "{{ item.cdp_policy }}"
+      lldp_policy: "{{ item.lldp_policy }}"
+      port_channel_policy: "{{ item.port_channel_policy }}"
+      stp_interface_policy: "{{ item.stp_interface_policy }}"
+      state: "{{ item.state }}"
+      validate_certs: false
+    loop: "{{ ifpolgroups.list | json_query('[?lag_type==`node`]') }}"
+    loop_control:
+      label: "Configuring Interface Policy type VPC using name \"{{ item.policy_group_name }}\""
+    tags:
+      - ifpolgrp
+
+  - name: Configure Interface Policy Group Type Access
+    cisco.aci.aci_interface_policy_leaf_policy_group:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      policy_group: "{{ item.policy_group_name }}"
+      description: "{{ item.description }}"
+      aep: "{{ item.aep }}"
+      link_level_policy: "{{ item.link_level_policy }}"
+      mcp_policy: "{{ item.mcp_policy }}"
+      lag_type: "leaf"
+      cdp_policy: "{{ item.cdp_policy }}"
+      lldp_policy: "{{ item.lldp_policy }}"
+      stp_interface_policy: "{{ item.stp_interface_policy }}"
+      state: "{{ item.state }}"
+      validate_certs: false
+    loop: "{{ ifpolgroups.list | json_query('[?lag_type==`access`]') }}"
+    loop_control:
+      label: "Configuring Interface Policy type Access using name \"{{ item.policy_group_name }}\""
+    tags:
+      - ifpolgrp
+
+  - name: Group Information to Generate Interface Configuration
+    set_fact:
+      leaf_inte_pro_groupby: "{{ leaf_int_pols.list | groupby('leaf_int_profile') }}"
+    tags:
+      - int_selector
+
+  - name: Generate XML, Configure Leaf Interface Profiles, Interface Selectors and Associate Policy Groups
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content: "{{ lookup('template', '../templates/leaf_int_pro.xml.j2') }}"
+    tags:
+      - int_selector
+
+  - name: Associate Leaf Interface Profile to Switch Profile
+    cisco.aci.aci_interface_selector_to_switch_policy_leaf_profile:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      leaf_profile: "{{ item.sw_profile }}"
+      interface_selector: "{{ item.leaf_int_profile }}"
+      state: "present"
+      validate_certs: false
+    loop: "{{ leaf_int_pols.list | json_query('[].{leaf_int_profile: leaf_int_profile, sw_profile: sw_profile}')|unique }}"
+    loop_control:
+      label: "Associating Leaf Interface Profile \"{{ item.leaf_int_profile }}\" to Switch Profile \"{{ item.sw_profile }}\""
+    tags:
+      - int_profile

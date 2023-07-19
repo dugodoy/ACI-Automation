@@ -1,0 +1,19 @@
+<polUni>
+	<infraInfra annotation="" dn="uni/infra" nameAlias="" ownerKey="" ownerTag="">
+{% for int_pro, int_sels in leaf_inte_pro_groupby %}
+		<infraAccPortP annotation="" descr="" dn="" name="{{ int_pro }}" nameAlias="" ownerKey="" ownerTag="">
+{% for int_sel in int_sels %}
+			<infraHPortS annotation="" descr="" dn="" name="{{ int_sel.int_selector }}" nameAlias="" ownerKey="" ownerTag="" type="range">
+{%if int_sel.interface_type == 'vpc' %}
+				<infraRsAccBaseGrp annotation="" dn="" fexId="101" tDn="uni/infra/funcprof/accbundle-{{ int_sel.policy_group_name }}"/>
+{% endif %}
+{%if int_sel.interface_type == 'switch_port' %}
+				<infraRsAccBaseGrp annotation="" dn="" fexId="101" tDn="uni/infra/funcprof/accportgrp-{{ int_sel.policy_group_name }}"/>
+{% endif %}
+				<infraPortBlk annotation="" descr="{{ int_sel.int_description }}" dn="" fromCard="1" fromPort="{{ int_sel.interface }}" name="block2" nameAlias="" toCard="1" toPort="{{ int_sel.interface }}"/>
+			</infraHPortS>
+{% endfor %}
+		</infraAccPortP>
+{% endfor %}
+	</infraInfra>
+</polUni>

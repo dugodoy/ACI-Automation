@@ -1,0 +1,845 @@
+---
+- name: Configure ACI Initial Configuration
+  hosts: apics
+  connection: local
+  gather_facts: false
+    
+  tasks:
+  - name: Loading "Fabric Policies" Information from CSV File
+    read_csv:
+      path: ../aci_config/fabric_membership-{{ inventory_hostname }}.csv
+    register: fabric_memberships
+    delegate_to: localhost
+    tags:
+     - membership
+     - oob
+     - rack
+     - bgp
+     - fab_spine_profiles
+     - fab_leaf_profiles
+
+  - name: Loading "Initial Configurations" Information from CSV File
+    read_csv:
+      path: ../aci_config/initial_config-{{ inventory_hostname }}.csv
+    register: initial_configs
+    delegate_to: localhost
+    tags:
+     - dns
+     - bgp
+     - syslog
+     - snmp
+     - ntp
+
+  - name: Loading "Monitoring Configurations" Information from CSV File
+    read_csv:
+      path: ../aci_config/monitoring-{{ inventory_hostname }}.csv
+    register: monitoring
+    delegate_to: localhost
+    tags:
+     - syslog
+     - snmp
+
+  - name: Loading "Security Configurations" Information from CSV File
+    read_csv:
+      path: ../aci_config/security-{{ inventory_hostname }}.csv
+    register: security
+    delegate_to: localhost
+    tags:
+     - tacacs
+
+  - name: Apply Best Practices
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <!-- AES PASSPHRASE -->
+            <pkiExportEncryptionKey dn="uni/exportcryptkey" passphrase="C1sco12345" strongEncryptionEnabled="yes"/>
+            <infraInfra annotation="" dn="uni/infra" nameAlias="" ownerKey="" ownerTag="">
+                <!-- ENABLE PORT TRACKING -->
+                <infraPortTrackPol name="default" delay="120" minlinks="0" adminSt="on"/>
+                <!-- ENABLE MCP POLICY -->
+                <mcpInstPol adminSt="enabled" key="C1sco12345" ctrl="pdu-per-vlan" initDelayTime="180" loopDetectMult="3" loopProtectAct="port-disable" name="default" txFreq="2" txFreqMsec="0"/>
+                <!-- ENABLE ENFORCE SUBNET CHECK AND DISABLE REMOTE ENDPOINT LEARNING -->
+                <infraSetPol enforceSubnetCheck="yes" name="default" unicastXrEpLearnDisable="yes"/>
+                <!-- ENABLE ROGUE EP CONTROL -->
+                <epControlP adminSt="enabled" name="default"/>
+                <!-- ENABLE IP AGING -->
+                <epIpAgingP adminSt="enabled" name="default"/>
+                <!-- PRESERVE COS -->
+                <qosInstPol ctrl="dot1p-preserve" name="default"/>
+            </infraInfra>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <!-- ENABLE DOM -->
+                <fabricNodeControl name="default" control="Dom"/>
+                <!-- SET COOP TO STRICT -->
+                <coopPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="" type="strict"/>
+                <!-- DECREASE ISIS METRIC TO 32 -->
+                <isisDomPol name="default" redistribMetric="32"/>
+                <!-- ENABLE ISIS BFD BETWEEN LEAF AND SPINE -->
+                <l3IfPol annotation="" bfdIsis="enabled" name="default"/>
+                <!-- SET FABRIC MTU TO 9216 -->
+                <l2InstPol fabricMtu="9216" managementMtu="9000" name="default"/>
+                <!-- SET APIC PREFERRED CONNECTIVITY TO OOB -->
+                <mgmtConnectivityPrefs annotation="" descr="" dn="" interfacePref="ooband" name="default" nameAlias="" ownerKey="" ownerTag=""/>
+            </fabricInst>
+        </polUni>
+    tags:
+     - best_practice
+
+  - name: Register Nodes
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <ctrlrInst annotation="" dn="uni/controller" name="" nameAlias="" ownerKey="" ownerTag="">
+                <fabricNodeIdentPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricNodeIdentP annotation="" descr="" dn="" extPoolId="0" fabricId="1" name="{{ item.node_name }}" nameAlias="" nodeId="{{ item.node_id }}" nodeType="unspecified" podId="{{ item.pod_id }}" role="unspecified" serial="{{ item.serial_number }}"/>
+                </fabricNodeIdentPol>
+            </ctrlrInst>
+        </polUni>
+    loop: "{{ fabric_memberships.list }}"
+    loop_control:
+      label: "Registering Node \"{{ item.node_id }}\", Serial Number \"{{ item.serial_number }}\" as \"{{ item.node_name }}\""
+    tags:
+     - membership
+
+  - name: Configure Rack Objects
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <geoSite annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                  <geoBuilding annotation="" descr="" dn="" name="default" nameAlias="">
+                    <geoFloor annotation="" descr="" dn="" name="default" nameAlias="">
+                      <geoRoom annotation="" descr="" dn="" name="default" nameAlias="">
+                        <geoRack annotation="" descr="" dn="" name="{{ item.node_rack }}" nameAlias="">
+                        </geoRack>
+                      </geoRoom>
+                    </geoFloor>
+                  </geoBuilding>
+                </geoSite>
+            </fabricInst>
+        </polUni>
+    loop: "{{ fabric_memberships.list | json_query('[?node_rack!=``].{node_rack: node_rack}') |unique }}"
+    loop_control:
+      label: "Configuring Rack \"{{ item.node_rack }}\""
+    tags:
+     - rack
+
+  - name: Associate Nodes to Rack
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <geoSite annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                  <geoBuilding annotation="" descr="" dn="" name="default" nameAlias="">
+                    <geoFloor annotation="" descr="" dn="" name="default" nameAlias="">
+                      <geoRoom annotation="" descr="" dn="" name="default" nameAlias="">
+                        <geoRack annotation="" descr="" dn="" name="{{ item.node_rack }}" nameAlias="">
+                          <geoRsNodeLocation annotation="" dn="" tDn="topology/pod-{{ item.pod_id }}/node-{{ item.node_id }}"/>
+                        </geoRack>
+                      </geoRoom>
+                    </geoFloor>
+                  </geoBuilding>
+                </geoSite>
+            </fabricInst>
+        </polUni>
+    loop: "{{ fabric_memberships.list | json_query('[?node_id!=``].{node_name: node_name, node_id: node_id, pod_id: pod_id, node_rack: node_rack}')}}"
+    loop_control:
+      label: "Associating Node \"{{ item.node_name }}\" to Rack \"{{ item.node_rack }}\""
+    tags:
+     - rack
+
+  - name: Configure Out-of-Band IP Address
+    cisco.aci.aci_static_node_mgmt_address:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      epg: default
+      pod_id: "{{ item.pod_id }}"
+      type: out_of_band
+      node_id: "{{ item.node_id }}"
+      ipv4_address: "{{ item.node_ip }}"
+      ipv4_gw: "{{ item.node_gw }}"
+      state: present
+    delegate_to: localhost
+    loop: "{{ fabric_memberships.list }}"
+    loop_control:
+      label: "Configuring IP \"{{ item.node_ip }}\" for Node \"{{ item.node_name }}\""
+    tags:
+     - oob
+
+  - name: Configure BGP ASN and Associate to the Fabric
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <bgpInstPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <bgpAsP annotation="" asn="{{ item.bgp_asn }}" descr="" dn="" name="" nameAlias=""/>
+                </bgpInstPol>
+                <fabricPodP annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricPodS annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="" type="ALL">
+                        <fabricRsPodPGrp annotation="" dn="" tDn="uni/fabric/funcprof/podpgrp-{{ item.fab_pod_pol_name }}"/>
+                    </fabricPodS>
+                </fabricPodP>
+                <fabricFuncP annotation="" descr="" dn="" name="" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricPodPGrp annotation="" descr="" dn="" name="{{ item.fab_pod_pol_name }}" nameAlias="" ownerKey="" ownerTag="">
+                        <fabricRsPodPGrpIsisDomP annotation="" dn="" tnIsisDomPolName="default"/>
+                        <fabricRsPodPGrpBGPRRP annotation="" dn="" tnBgpInstPolName="default"/>
+                    </fabricPodPGrp>
+                </fabricFuncP>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?bgp_asn!=`` && fab_pod_pol_name!=``].{bgp_asn: bgp_asn, fab_pod_pol_name: fab_pod_pol_name}') }}"
+    loop_control:
+      label: "Configuring BGP ASN \"{{ item.bgp_asn }}\" and Associating it to the Fabric Policy"
+    tags:
+     - bgp
+
+  - name: Configure Spines as Route Reflectors
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <bgpInstPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <bgpRRP annotation="" descr="" dn="" name="" nameAlias="">
+                        <bgpRRNodePEp annotation="" descr="" dn="" id="{{ item.node_id }}" nameAlias="" podId="{{ item.pod_id }}"/>
+                    </bgpRRP>
+                </bgpInstPol>
+            </fabricInst>
+        </polUni>
+    loop: "{{ fabric_memberships.list | json_query('[?node_type==`spine`].{node_id: node_id, pod_id: pod_id}') }}"
+    loop_control:
+      label: "Configuring Node \"{{ item.node_id }}\" as a Route Reflector"
+    tags:
+     - bgp
+
+  - name: Configure Fabric Switch Policy Groups
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <fabricFuncP annotation="" descr="" dn="" name="" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricSpNodePGrp annotation="" descr="" dn="" name="SWPOLGRP_SPINES" nameAlias="" ownerKey="" ownerTag="">
+                        <fabricRsNodeCtrl annotation="" dn="" tnFabricNodeControlName="default"/>
+                    </fabricSpNodePGrp>
+                    <fabricLeNodePGrp annotation="" descr="" dn="" name="SWPOLGRP_LEAFS" nameAlias="" ownerKey="" ownerTag="">
+                        <fabricRsNodeCtrl annotation="" dn="" tnFabricNodeControlName="default"/>
+                    </fabricLeNodePGrp>
+                </fabricFuncP>
+            </fabricInst>
+        </polUni>
+    tags:
+     - fab_spine_profiles
+     - fab_leaf_profiles
+
+  - name: Configure Fabric Spine Profiles
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <fabricSpineP annotation="" descr="" dn="" name="FBSWPRO_SPINE_{{ item.node_id }}" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricSpineS annotation="" descr="SPINE_{{ item.node_id }}" dn="" name="SWSEL_SPINE_{{ item.node_id }}" nameAlias="" ownerKey="" ownerTag="" type="range">
+                        <fabricRsSpNodePGrp annotation="" dn="" tDn="uni/fabric/funcprof/spnodepgrp-SWPOLGRP_SPINES"/>
+                        <fabricNodeBlk annotation="" descr="" dn="" from_="{{ item.node_id }}" name="SWSPINE0{{ item.node_id }}" nameAlias="" to_="{{ item.node_id }}"/>
+                    </fabricSpineS>
+                </fabricSpineP>
+            </fabricInst>
+        </polUni>
+    loop: "{{ fabric_memberships.list | json_query('[?node_type==`spine`].{node_id: node_id}') }}"
+    loop_control:
+      label: "Configuring Fabric Switch Profile for Node \"{{ item.node_id }}\""
+    tags:
+     - fab_spine_profiles
+
+  - name: Configure Fabric Leaf Profiles
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <fabricLeafP annotation="" descr="" dn="" name="FBSWPRO_LEAF_{{ item.node_id }}" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricLeafS annotation="" descr="LEAF_{{ item.node_id }}" dn="" name="SWSEL_LEAF_{{ item.node_id }}" nameAlias="" ownerKey="" ownerTag="" type="range">
+                        <fabricRsLeNodePGrp annotation="" dn="" tDn="uni/fabric/funcprof/lenodepgrp-SWPOLGRP_LEAFS"/>
+                        <fabricNodeBlk annotation="" descr="" dn="" from_="{{ item.node_id }}" name="SWMEDISL{{ item.node_id }}" nameAlias="" to_="{{ item.node_id }}"/>
+                    </fabricLeafS>
+                </fabricLeafP>
+            </fabricInst>
+        </polUni>
+    loop: "{{ fabric_memberships.list | json_query('[?node_type==`leaf`].{node_id: node_id}') }}"
+    loop_control:
+      label: "Configuring Fabric Switch Profile for Node \"{{ item.node_id }}\""
+    tags:
+     - fab_leaf_profiles
+
+  - name: Configure DNS Servers
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <dnsProfile IPVerPreference="IPv4" annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <dnsProv addr="{{ item.dns_servers }}" annotation="" dn="" name="" nameAlias="" preferred="{{ item.dns_preferred }}"/>
+                </dnsProfile>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?dns_servers!=``].{dns_servers: dns_servers, dns_preferred: dns_preferred}') }}"
+    loop_control:
+      label: "Configuring DNS Server \"{{ item.dns_servers }}\""
+    tags:
+     - dns
+
+  - name: Configure DNS Domain
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <dnsProfile IPVerPreference="IPv4" annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <dnsRsProfileToEpg annotation="" dn="" tDn="uni/tn-mgmt/mgmtp-default/oob-default"/>
+                    <dnsDomain annotation="" descr="" dn="" isDefault="yes" name="{{ item.dns_domain }}" nameAlias=""/>
+                </dnsProfile>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?dns_domain!=``].{dns_domain: dns_domain}') }}"
+    loop_control:
+      label: "Configuring DNS Domain \"{{ item.dns_domain }}\""
+    tags:
+     - dns
+
+  - name: Configure Syslog Group
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <syslogGroup annotation="" descr="" dn="" format="aci" includeMilliSeconds="yes" includeTimeZone="yes" name="{{ item.syslog_group_name }}" nameAlias="">
+                    <syslogProf adminState="enabled" annotation="" descr="" dn="" name="syslog" nameAlias=""/>
+                    <syslogFile adminState="enabled" annotation="" descr="" dn="" format="aci" name="" nameAlias="" severity="information"/>
+                    <syslogConsole adminState="enabled" annotation="" descr="" dn="" format="aci" name="" nameAlias="" severity="alerts"/>
+                </syslogGroup>
+            </fabricInst>
+        </polUni>
+    loop: "{{ monitoring.list | json_query('[?syslog_group_name!=``].{syslog_group_name: syslog_group_name}') |unique }}"
+    loop_control:
+      label: "Configuring Syslog Group Name \"{{ item.syslog_group_name }}\""
+    tags:
+      - syslog
+
+  - name: Configure Syslog Servers
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <syslogGroup annotation="" descr="" dn="" format="aci" includeMilliSeconds="yes" includeTimeZone="yes" name="{{ item.syslog_group_name }}" nameAlias="">
+                    <syslogRemoteDest adminState="enabled" annotation="" descr="" dn="" format="aci" forwardingFacility="local7" host="{{ item.syslog_server }}" name="" nameAlias="" port="{{ item.syslog_port }}" severity="information">
+                        <fileRsARemoteHostToEpg annotation="" dn="" tDn="uni/tn-mgmt/mgmtp-default/oob-default"/>
+                    </syslogRemoteDest>
+                </syslogGroup>
+            </fabricInst>
+        </polUni>
+    loop: "{{ monitoring.list | json_query('[?syslog_src_name!=`` && syslog_group_name!=``].{syslog_src_name: syslog_src_name, syslog_group_name: syslog_group_name, syslog_server: syslog_server, syslog_port: syslog_port}') }}"
+    loop_control:
+      label: "Configuring Syslog Server \"{{ item.syslog_server }}\" on Group \"{{ item.syslog_group_name }}\""
+    tags:
+      - syslog
+
+  - name: Associate Syslog Group to the Fabric
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fvTenant annotation="" descr="" dn="uni/tn-common" name="common" nameAlias="" ownerKey="" ownerTag="">
+                <monEPGPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <syslogSrc annotation="" descr="" dn="" incl="faults" minSev="warnings" name="{{ item.syslog_src_name }}" nameAlias="">
+                        <syslogRsDestGroup annotation="" dn="" tDn="uni/fabric/slgroup-{{ item.syslog_group_name }}"/>
+                    </syslogSrc>
+                </monEPGPol>
+            </fvTenant>
+            <infraInfra annotation="" dn="uni/infra" nameAlias="" ownerKey="" ownerTag="">
+                <monInfraPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <syslogSrc annotation="" descr="" dn="" incl="faults" minSev="warnings" name="{{ item.syslog_src_name }}" nameAlias="">
+                        <syslogRsDestGroup annotation="" dn="" tDn="uni/fabric/slgroup-{{ item.syslog_group_name }}"/>
+                    </syslogSrc>
+                </monInfraPol>
+            </infraInfra>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <monFabricPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <syslogSrc annotation="" descr="" dn="" incl="faults" minSev="warnings" name="{{ item.syslog_src_name }}" nameAlias="">
+                        <syslogRsDestGroup annotation="" dn="" tDn="uni/fabric/slgroup-{{ item.syslog_group_name }}"/>
+                    </syslogSrc>
+                </monFabricPol>
+                <monCommonPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <syslogSrc annotation="" descr="" dn="" incl="faults" minSev="warnings" name="{{ item.syslog_src_name }}" nameAlias="">
+                        <syslogRsDestGroup annotation="" dn="" tDn="uni/fabric/slgroup-{{ item.syslog_group_name }}"/>
+                    </syslogSrc>
+                </monCommonPol>
+            </fabricInst>
+        </polUni>
+    loop: "{{ monitoring.list | json_query('[?syslog_src_name!=`` && syslog_group_name!=``].{syslog_src_name: syslog_src_name, syslog_group_name: syslog_group_name}') |unique }}"
+    loop_control:
+      label: "Associating Syslog Group \"{{ item.syslog_group_name }}\" to the Fabric"
+    tags:
+      - syslog
+
+  - name: Configure SNMP Policy
+    cisco.aci.aci_snmp_policy:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      location: "{{ item.snmp_location }}"
+      contact: "{{ item.snmp_contact }}"
+      admin_state: enabled
+      name: "{{ item.snmp_policy_name }}"
+      state: present
+    loop: "{{ monitoring.list | json_query('[?snmp_policy_name!=``].{snmp_policy_name: snmp_policy_name, snmp_location: snmp_location, snmp_contact: snmp_contact}') }}"
+    loop_control:
+      label: "Configuring SNMP Policy Name \"{{ item.snmp_policy_name }}\""
+    tags:
+      - snmp
+
+  - name: Configure SNMP Client Group
+    cisco.aci.aci_snmp_client_group:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      policy: "{{ item.snmp_policy_name }}"
+      client_group: "{{ item.snmp_client_group }}"
+      mgmt_epg: oob-default
+      state: present
+    loop: "{{ monitoring.list | json_query('[?snmp_client_group!=``].{snmp_client_group: snmp_client_group, snmp_policy_name: snmp_policy_name}') |unique }}"
+    loop_control:
+      label: "Configuring SNMP Client Group \"{{ item.snmp_client_group }}\""
+    tags:
+      - snmp
+
+  - name: Configure SNMP Client
+    cisco.aci.aci_snmp_client:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      policy: "{{ item.snmp_policy_name }}"
+      client_group: "{{ item.snmp_client_group }}"
+      address: "{{ item.snmp_client_ip }}"
+      client_name: "{{ item.snmp_client_name }}"
+      state: present
+    loop: "{{ monitoring.list | json_query('[?snmp_policy_name!=``].{snmp_policy_name: snmp_policy_name, snmp_client_group: snmp_client_group, snmp_client_name: snmp_client_name, snmp_client_ip: snmp_client_ip}') }}"
+    loop_control:
+      label: "Configuring SNMP Clients \"{{ item.snmp_client_name }}\""
+    tags:
+      - snmp
+
+  - name: Configure SNMP v3 Users
+    cisco.aci.aci_snmp_user:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      policy: "{{ item.snmp_policy_name }}"
+      name: "{{ item.snmp_v3_user }}"
+      auth_type: "{{ item.snmpv3_auth_type }}"
+      auth_key: "{{ item.snmpv3_auth_key }}"
+      privacy_type: "{{ item.snmpv3_priv_type }}"
+      privacy_key: "{{ item.snmpv3_priv_key }}"
+      state: present
+    loop: "{{ monitoring.list | json_query('[?snmp_v3_user!=``].{snmp_policy_name: snmp_policy_name, snmp_v3_user: snmp_v3_user, snmpv3_auth_type: snmpv3_auth_type, snmpv3_auth_key: snmpv3_auth_key, snmpv3_priv_type: snmpv3_priv_type, snmpv3_priv_key: snmpv3_priv_key}') }}"
+    loop_control:
+      label: "Configuring SNMP v3 User \"{{ item.snmp_v3_user }}\""
+    tags:
+      - snmp
+
+  - name: Associate SNMP Policy to the Fabric
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <fabricFuncP annotation="" descr="" dn="" name="" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricPodPGrp annotation="" descr="" dn="" name="{{ item.fab_pod_pol_name }}" nameAlias="" ownerKey="" ownerTag="">
+                        <fabricRsSnmpPol annotation="" dn="" tnSnmpPolName="{{ item.snmp_policy_name }}"/>
+                    </fabricPodPGrp>
+                </fabricFuncP>
+            </fabricInst>
+        </polUni>
+    loop: "{{ monitoring.list | json_query('[?snmp_policy_name!=`` && fab_pod_pol_name!=``].{snmp_policy_name: snmp_policy_name, fab_pod_pol_name: fab_pod_pol_name}') }}"
+    loop_control:
+      label: "Associating SNMP Policy Name \"{{ item.snmp_policy_name }}\" to the Fabric"
+    tags:
+     - snmp
+
+  - name: Configure SNMP Trap Group
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <snmpGroup annotation="" descr="" dn="" name="{{ item.snmp_trap_group_name }}" nameAlias="">
+                </snmpGroup>
+            </fabricInst>
+        </polUni>
+    loop: "{{ monitoring.list | json_query('[?snmp_trap_group_name!=``].{snmp_trap_group_name: snmp_trap_group_name}') |unique }}"
+    loop_control:
+      label: "Configuring Syslog Group Name \"{{ item.snmp_trap_group_name }}\""
+    tags:
+      - snmp
+
+  - name: Configure SNMP Trap Servers
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <snmpGroup annotation="" descr="" dn="" name="{{ item.snmp_trap_group_name }}" nameAlias="">
+                    <snmpTrapDest annotation="" descr="" host="{{ item.snmp_trap_server }}" name="" nameAlias="" notifT="traps" port="162" secName="{{ item.snmp_trap_security_name }}" v3SecLvl="{{ item.snmp_trap_security_level }}" ver="{{ item.snmp_trap_version }}">
+                        <fileRsARemoteHostToEpg annotation="" tDn="uni/tn-mgmt/mgmtp-default/oob-default"/>
+                    </snmpTrapDest>
+                </snmpGroup>
+            </fabricInst>
+        </polUni>
+    loop: "{{ monitoring.list | json_query('[?snmp_trap_group_name!=``].{snmp_trap_group_name: snmp_trap_group_name, snmp_trap_server: snmp_trap_server, snmp_trap_security_name: snmp_trap_security_name, snmp_trap_security_level: snmp_trap_security_level, snmp_trap_version: snmp_trap_version}') }}"
+    loop_control:
+      label: "Configuring SNMP Trap Server \"{{ item.snmp_trap_server }}\" on Group \"{{ item.snmp_trap_group_name }}\""
+    tags:
+      - snmp
+
+  - name: Associate SNMP Trap Group to the Fabric
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fvTenant annotation="" descr="" dn="uni/tn-common" name="common" nameAlias="" ownerKey="" ownerTag="">
+                <monEPGPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <snmpSrc annotation="" descr="" incl="events,faults" minSev="info" name="{{ item.snmp_trap_src_name }}" nameAlias="">
+                        <snmpRsDestGroup annotation="" tDn="uni/fabric/snmpgroup-{{ item.snmp_trap_group_name }}"/>
+                    </snmpSrc>
+                </monEPGPol>
+            </fvTenant>
+            <infraInfra annotation="" dn="uni/infra" nameAlias="" ownerKey="" ownerTag="">
+                <monInfraPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <snmpSrc annotation="" descr="" incl="events,faults" minSev="info" name="{{ item.snmp_trap_src_name }}" nameAlias="">
+                        <snmpRsDestGroup annotation="" tDn="uni/fabric/snmpgroup-{{ item.snmp_trap_group_name }}"/>
+                    </snmpSrc>
+                </monInfraPol>
+            </infraInfra>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <monFabricPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <snmpSrc annotation="" descr="" incl="events,faults" minSev="info" name="{{ item.snmp_trap_src_name }}" nameAlias="">
+                        <snmpRsDestGroup annotation="" tDn="uni/fabric/snmpgroup-{{ item.snmp_trap_group_name }}"/>
+                    </snmpSrc>
+                </monFabricPol>
+                <monCommonPol annotation="" descr="" dn="" name="default" nameAlias="" ownerKey="" ownerTag="">
+                    <snmpSrc annotation="" descr="" incl="events,faults" minSev="info" name="{{ item.snmp_trap_src_name }}" nameAlias="">
+                        <snmpRsDestGroup annotation="" tDn="uni/fabric/snmpgroup-{{ item.snmp_trap_group_name }}"/>
+                    </snmpSrc>
+                </monCommonPol>
+            </fabricInst>
+        </polUni>
+    loop: "{{ monitoring.list | json_query('[?snmp_trap_src_name!=``].{snmp_trap_src_name: snmp_trap_src_name, snmp_trap_group_name: snmp_trap_group_name}') |unique }}"
+    loop_control:
+      label: "Associating SNMP Trap Group \"{{ item.snmp_trap_group_name }}\" to the Fabric"
+    tags:
+      - snmp
+
+  - name: Configure Timezone
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <datetimeFormat annotation="" childAction="" descr="" displayFormat="local" dn="uni/fabric/format-default" name="default" showOffset="enabled" tz="{{ item.timezone }}">
+                </datetimeFormat>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?timezone!=`` && fab_pod_pol_name!=``].{timezone: timezone}') }}"
+    loop_control:
+      label: "Configuring Timezone \"{{ item.timezone }}\" on the Fabric"
+    tags:
+      - ntp
+
+  - name: Configure NTP Policy
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <datetimePol StratumValue="8" adminSt="enabled" authSt="disabled" dn="" masterMode="disabled" name="{{ item.ntp_policy_name }}" serverState="disabled">
+                </datetimePol>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?ntp_policy_name!=``].{ntp_policy_name: ntp_policy_name}') |unique }}"
+    loop_control:
+      label: "Configuring NTP Policy Name \"{{ item.ntp_policy_name }}\" to the Fabric"
+    tags:
+      - ntp
+
+  - name: Configure NTP Authentication Keys
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <datetimePol authSt="enabled" descr="" dn="" name="{{ item.ntp_policy_name }}">
+                    <datetimeNtpAuthKey annotation="" descr="" id="{{ item.ntp_key_id }}" key="{{ item.ntp_key }}" keyType="{{ item.ntp_auth_type }}" name="" nameAlias="" trusted="yes"/>
+                </datetimePol>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?ntp_policy_name!=``].{ntp_policy_name: ntp_policy_name, ntp_key_id: ntp_key_id, ntp_key: ntp_key, ntp_auth_type: ntp_auth_type}') }}"
+    loop_control:
+      label: "Configuring NTP Key ID \"{{ item.ntp_key_id }}\" to the Fabric"
+    tags:
+      - ntp
+
+  - name: Configure NTP Servers
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <datetimePol dn="uni/fabric/time-default" name="{{ item.ntp_policy_name }}">
+                    <datetimeNtpProv annotation="" descr="" keyId="0" maxPoll="6" minPoll="4" name="{{ item.ntp_server }}" nameAlias="" preferred="{{ item.ntp_preferred }}" trueChimer="disabled">
+                        <datetimeRsNtpProvToEpg annotation="" tDn="uni/tn-mgmt/mgmtp-default/oob-default"/>
+                    </datetimeNtpProv>
+                </datetimePol>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?ntp_policy_name!=``].{ntp_policy_name: ntp_policy_name, ntp_server: ntp_server, ntp_preferred: ntp_preferred, ntp_key_id: ntp_key_id}') }}"
+    loop_control:
+      label: "Configuring NTP Server \"{{ item.ntp_server }}\" on Policy \"{{ item.ntp_policy_name }}\""
+    tags:
+      - ntp
+
+  - name: Associate NTP Policy to the Fabric
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <fabricInst annotation="" dn="uni/fabric" name="" nameAlias="" ownerKey="" ownerTag="">
+                <fabricFuncP annotation="" descr="" dn="" name="" nameAlias="" ownerKey="" ownerTag="">
+                    <fabricPodPGrp annotation="" descr="" dn="" name="{{ item.fab_pod_pol_name }}" nameAlias="" ownerKey="" ownerTag="">
+                        <fabricRsTimePol annotation="" dn="" tnDatetimePolName="{{ item.ntp_policy_name }}"/>
+                    </fabricPodPGrp>
+                </fabricFuncP>
+            </fabricInst>
+        </polUni>
+    loop: "{{ initial_configs.list | json_query('[?ntp_policy_name!=`` && fab_pod_pol_name!=``].{ntp_policy_name: ntp_policy_name, fab_pod_pol_name: fab_pod_pol_name}') |unique }}"
+    loop_control:
+      label: "Associating NTP Policy Name \"{{ item.ntp_policy_name }}\" to the Fabric"
+    tags:
+      - ntp
+
+  - name: Configure Tacacs Servers
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <aaaUserEp annotation="" descr="" dn="uni/userext" name="" nameAlias="" ownerKey="" ownerTag="" pwdStrengthCheck="yes">
+                <aaaTacacsPlusEp annotation="" descr="" dn="" name="" nameAlias="" ownerKey="" ownerTag="" retries="1" timeout="5">
+                    <aaaTacacsPlusProvider annotation="" authProtocol="{{ item.tacacs_auth_protocol }}" key="{{ item.tacacs_auth_key }}" monitorServer="disabled" name="{{ item.tacacs_server }}" port="49" retries="1" timeout="5">
+                        <aaaRsSecProvToEpg annotation="" dn="" tDn="uni/tn-mgmt/mgmtp-default/oob-default"/>
+                    </aaaTacacsPlusProvider>
+                </aaaTacacsPlusEp>
+            </aaaUserEp>
+        </polUni>
+    loop: "{{ security.list | json_query('[?tacacs_server!=``].{tacacs_server: tacacs_server, tacacs_auth_protocol: tacacs_auth_protocol, tacacs_auth_key: tacacs_auth_key}') }}"
+    loop_control:
+      label: "Configuring Tacacs Server \"{{ item.tacacs_server }}\""
+    tags:
+      - tacacs
+
+  - name: Configure Tacacs Login Domain
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <aaaUserEp annotation="" descr="" dn="uni/userext" name="" nameAlias="" ownerKey="" ownerTag="" pwdStrengthCheck="yes">
+                <aaaLoginDomain annotation="" descr="" dn="" name="{{ item.tacacs_login_domain }}" nameAlias="" ownerKey="" ownerTag="">
+                </aaaLoginDomain>
+            </aaaUserEp>
+        </polUni>
+    loop: "{{ security.list | json_query('[?tacacs_login_domain!=``].{tacacs_login_domain: tacacs_login_domain}') |unique }}"
+    loop_control:
+      label: "Configuring Authentication Domain Name \"{{ item.tacacs_login_domain }}\""
+    tags:
+      - tacacs
+
+  - name: Associate Tacacs Servers to Login Domain
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <aaaUserEp annotation="" descr="" dn="uni/userext" name="" nameAlias="" ownerKey="" ownerTag="" pwdStrengthCheck="yes">
+                <aaaTacacsPlusEp annotation="" descr="" dn="" name="" nameAlias="" ownerKey="" ownerTag="" retries="1" timeout="5">
+                    <aaaTacacsPlusProviderGroup annotation="" descr="" dn="" name="{{ item.tacacs_login_domain }}" nameAlias="" ownerKey="" ownerTag="">
+                        <aaaProviderRef annotation="" descr="" dn="" name="{{ item.tacacs_server }}" nameAlias="" order="{{ item.tacacs_server_order_id }}" ownerKey="" ownerTag=""/>
+                    </aaaTacacsPlusProviderGroup>
+               </aaaTacacsPlusEp>
+            </aaaUserEp>
+        </polUni>
+    loop: "{{ security.list | json_query('[?tacacs_login_domain!=``].{tacacs_server: tacacs_server, tacacs_login_domain: tacacs_login_domain, tacacs_server_order_id: tacacs_server_order_id}') }}"
+    loop_control:
+      label: "Associating Tacacs Server \"{{ item.tacacs_server }}\" to Login Domain \"{{ item.tacacs_login_domain }}\""
+    tags:
+      - tacacs
+
+  - name: Associate Tacacs Login Domain to the Fabric
+    cisco.aci.aci_rest:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      method: post
+      path: /api/mo/uni.xml
+      content:
+        <polUni>
+            <aaaUserEp annotation="" descr="" dn="uni/userext" name="" nameAlias="" ownerKey="" ownerTag="" pwdStrengthCheck="yes">
+                <aaaLoginDomain annotation="" descr="" dn="" name="{{ item.tacacs_login_domain }}" nameAlias="" ownerKey="" ownerTag="">
+                    <aaaDomainAuth annotation="" descr="" name="" nameAlias="" ownerKey="" ownerTag="" providerGroup="{{ item.tacacs_login_domain }}" realm="tacacs"/>
+                </aaaLoginDomain>
+            </aaaUserEp>
+        </polUni>
+    loop: "{{ security.list | json_query('[?tacacs_login_domain!=``].{tacacs_login_domain: tacacs_login_domain}') |unique }}"
+    loop_control:
+      label: "Associating Tacacs Login Domain \"{{ item.tacacs_login_domain }}\" to the Fabric"
+    tags:
+      - tacacs

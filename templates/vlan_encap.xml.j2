@@ -1,0 +1,11 @@
+<polUni>
+	<infraInfra annotation="" dn="uni/infra" nameAlias="" ownerKey="" ownerTag="">
+{% for vlan_pool, vlans in vlan_pool_groupby %}
+		<fvnsVlanInstP allocMode="static" annotation="" descr="" dn="" name="{{ vlan_pool }}" nameAlias="" ownerKey="" ownerTag="">
+{% for vlan in vlans %}
+			<fvnsEncapBlk allocMode="static" annotation="" descr="{{ vlan.vlan_description }}" dn="" from="vlan-{{ vlan.vlan_from }}" name="" nameAlias="" role="external" to="vlan-{{ vlan.vlan_to }}"/>
+{% endfor %}
+		</fvnsVlanInstP>
+{% endfor %}
+	</infraInfra>
+</polUni>

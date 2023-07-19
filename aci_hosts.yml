@@ -1,0 +1,29 @@
+---
+all:
+  hosts:
+    mso:
+      ansible_python_interpreter: "python"
+      ansible_host: 198.18.133.100
+      ansible_user: admin
+      ansible_password: "C1sco12345"
+      ansible_connection: ansible.netcommon.httpapi
+      ansible_network_os: cisco.nd.nd
+      ansible_httpapi_validate_certs: False
+      ansible_httpapi_use_ssl: True
+      ansible_httpapi_use_proxy: True
+  children:
+    apics:
+      hosts:
+        apic01:
+          ansible_python_interpreter: "python"
+          ansible_host: 198.18.133.200
+          ansible_user: admin
+          ansible_password: "C1sco12345"
+        apic02:
+          ansible_python_interpreter: "python"
+          ansible_host: 198.18.132.200
+          ansible_user: admin
+          ansible_password: "C1sco12345"
+          ansible_password: "1234"
+
+
