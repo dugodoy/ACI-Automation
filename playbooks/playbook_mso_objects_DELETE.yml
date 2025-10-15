@@ -1,0 +1,53 @@
+---
+- name: Configure MSO Policies
+  hosts: mso
+  gather_facts: false
+
+  tasks:
+  - name: Loading "NDO Tenant Objects" Information from CSV File
+    read_csv:
+      path: ../aci_config/mso_tn_objects_DELETE.csv
+    register: mso_tn_objects
+    delegate_to: localhost
+
+  - name: DELETE Endpoint Group
+    cisco.mso.mso_schema_template_anp_epg:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      schema: "{{ item.schema_name }}"
+      template: "{{ item.template_name }}"
+      anp: "{{ item.anp_name }}"
+      epg: "{{ item.epg_name }}"
+      state: absent
+    loop: "{{ mso_tn_objects.list }}"
+    loop_control:
+      label: "DELETE EPG \"{{ item.epg_name }}\" on ANP \"{{ item.anp_name }}\" Associated to BD \"{{ item.bridge_domain }}\""
+
+  - name: DELETE Bridge Domain
+    cisco.mso.mso_schema_template_bd:
+      hostname: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      schema: "{{ item.schema_name }}"
+      template: "{{ item.template_name }}"
+      bd: "{{ item.bridge_domain }}"
+      state: absent
+    loop: "{{ mso_tn_objects.list | json_query('[].{schema_name: schema_name, template_name: template_name, bridge_domain: bridge_domain}') }}"
+    loop_control:
+      label: "DELETE BD Name \"{{ item.bridge_domain }}\" on Template \"{{ item.template_name }}\""
+
+  - name: Deploy Configuration
+    cisco.mso.ndo_schema_template_deploy:
+      host: "{{ ansible_host }}"
+      username: "{{ ansible_user }}"
+      password: "{{ ansible_password }}"
+      validate_certs: false
+      schema: "{{ item.schema_name }}"
+      template: "{{ item.template_name }}"
+      state: deploy
+    loop: "{{ mso_tn_objects.list | json_query('[].{schema_name: schema_name, template_name: template_name}') | unique  }}"
+    loop_control:
+      label: "Deploying Configuration for Schema \"{{ item.schema_name }}\" and Template \"{{ item.template_name }}\""
